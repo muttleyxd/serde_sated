@@ -1,0 +1,17 @@
+[package]
+name = "serde_sated"
+description = "sane adjacently tagged enum deserialization (with untagged variant) for serde"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+homepage = "https://github.com/muttleyxd/serde-sated"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0.60" }
+
+[dev-dependencies]
+serde = { version = "1.0.198", features = ["derive"] }
+serde_json = { version = "1.0.116" }
