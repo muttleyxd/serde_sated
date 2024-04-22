@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use serde_sated::deserialize_enum_with_untagged_as_fallback;
 
-// TODO: add support for renaming fields
+// // TODO: add support for renaming all fields
 #[derive(Debug, deserialize_enum_with_untagged_as_fallback, Serialize)]
 #[serde(tag = "resourceType", content = "resource")]
 pub enum ResourceStruct {
@@ -131,4 +131,52 @@ fn test_successful_deserialization() {
     let result: ResourceStruct =
         serde_json::from_value(variant_unknown_matched_by_untagged_type).unwrap();
     assert!(matches!(result, ResourceStruct::Unknown(_)));
+}
+
+#[derive(Debug, deserialize_enum_with_untagged_as_fallback, Serialize)]
+#[serde(tag = "resourceType", content = "resource")]
+pub enum ResourceStructWithRename {
+    #[serde(rename = "string")]
+    String(String),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+#[test]
+fn test_rename() {
+    let variant_string = json!({
+        "resourceType": "string",
+        "resource": "text"
+    });
+    let result: ResourceStructWithRename = serde_json::from_value(variant_string).unwrap();
+    assert!(matches!(result, ResourceStructWithRename::String(_)));
+}
+
+#[derive(Debug, deserialize_enum_with_untagged_as_fallback, Serialize)]
+#[serde(tag = "resourceType", content = "resource")]
+pub enum ResourceStructWithDeserializeWith {
+    #[serde(deserialize_with = "always_returns_five")]
+    Number(u32),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+fn always_returns_five<'de, D>(_deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(5u32)
+}
+
+#[test]
+fn test_deserialize_with() {
+    let variant_string = json!({
+        "resourceType": "Number",
+        "resource": 1
+    });
+    let result: ResourceStructWithDeserializeWith = serde_json::from_value(variant_string).unwrap();
+    assert!(matches!(
+        result,
+        ResourceStructWithDeserializeWith::Number(5)
+    ));
 }

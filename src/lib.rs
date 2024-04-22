@@ -8,8 +8,10 @@ use syn::{parse_macro_input, Attribute, Data, DeriveInput, LitStr, Type};
 
 #[derive(Debug)]
 struct EnumVariant {
+    pub deserialize_with: Option<String>,
     pub ident: String,
     pub content_type: String,
+    pub variant_ident: String,
 }
 
 fn path_to_ident(path: &syn::Path) -> String {
@@ -24,27 +26,41 @@ fn path_to_ident(path: &syn::Path) -> String {
     }
 }
 
-fn has_serde_untagged_attribute(attributes: &[Attribute]) -> bool {
+#[derive(Default)]
+struct SerdeAttributes {
+    pub deserialize_with: Option<String>,
+    pub rename: Option<String>,
+    pub untagged: bool,
+}
+
+fn gather_serde_attributes(attributes: &[Attribute]) -> SerdeAttributes {
+    let mut result = SerdeAttributes::default();
+
     for attribute in attributes {
         if attribute.path().is_ident("serde") {
-            let mut is_untagged = false;
             attribute
                 .parse_nested_meta(|meta| {
                     // #[serde(untagged))]
                     if meta.path.is_ident("untagged") {
-                        is_untagged = true;
+                        result.untagged = true;
+                    }
+                    // #[serde(rename = "string")]
+                    if meta.path.is_ident("rename") {
+                        let lit: LitStr = meta.value()?.parse()?;
+                        result.rename = Some(lit.value());
+                    }
+                    // #[serde(deserialize_with = "fn_name")]
+                    if meta.path.is_ident("deserialize_with") {
+                        let lit: LitStr = meta.value()?.parse()?;
+                        result.deserialize_with = Some(lit.value());
                     }
 
                     Ok(())
                 })
                 .unwrap();
-
-            if is_untagged {
-                return true;
-            }
         }
     }
-    false
+    result
 }
 
 fn get_tag_and_content_attributes(attributes: &[Attribute]) -> (String, String) {
@@ -79,15 +95,24 @@ fn get_tag_and_content_attributes(attributes: &[Attribute]) -> (String, String) 
 }
 
 fn generate_if_branch(enum_name: &str, variant: &EnumVariant) -> String {
+    let deserialize_line = match variant.deserialize_with.as_ref() {
+        None => format!(
+            "{}::deserialize(resource.to_owned()).map_err(|e| serde::de::Error::custom(e))?",
+            variant.content_type
+        ),
+        Some(value) => {
+            format!("{value}(resource.to_owned()).map_err(|e| serde::de::Error::custom(e))?")
+        }
+    };
+
     format!(
         r#"
-        if resource_type == "{0}" {{
-            let resource = {1}::deserialize(resource.to_owned())
-                .map_err(|e| serde::de::Error::custom(e))?;
+        if resource_type == "{2}" {{
+            let resource = {1};
             Ok({enum_name}::{0}(resource))
         }}
 "#,
-        variant.ident, variant.content_type
+        variant.ident, deserialize_line, variant.variant_ident
     )
 }
 
@@ -209,7 +234,7 @@ pub fn derive_enum(item: TokenStream) -> TokenStream {
         let variant_name = variant.ident.to_owned();
         let mut variant_inner_type: Option<String> = None;
 
-        let is_untagged = has_serde_untagged_attribute(&variant.attrs);
+        let attributes = gather_serde_attributes(&variant.attrs);
 
         for field in &variant.fields {
             let field_path = match &field.ty {
@@ -221,12 +246,16 @@ pub fn derive_enum(item: TokenStream) -> TokenStream {
 
         match variant_inner_type {
             Some(value) => {
+                let variant_ident = attributes.rename.unwrap_or(variant_name.to_string());
+
                 let variant = EnumVariant {
+                    deserialize_with: attributes.deserialize_with,
                     ident: variant_name.to_string(),
                     content_type: value,
+                    variant_ident,
                 };
 
-                if is_untagged {
+                if attributes.untagged {
                     untagged_variant = Some(variant);
                 } else {
                     variants.push(variant);
@@ -239,6 +268,7 @@ pub fn derive_enum(item: TokenStream) -> TokenStream {
     if untagged_variant.is_none() {
         panic!("No untagged variant specified, use serde::Deserialize instead");
     }
+
     let if_else_tree = generate_if_else_tree(&enum_name, &variants, &untagged_variant.unwrap());
 
     let output = format!(
