@@ -4,7 +4,7 @@ description = "sane adjacently tagged enum deserialization (with untagged varian
 version = "0.1.2"
 edition = "2021"
 license = "MIT"
-homepage = "https://github.com/muttleyxd/serde_sated"
+repository = "https://github.com/muttleyxd/serde_sated"
 
 [lib]
 proc-macro = true
